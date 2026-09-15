@@ -24,6 +24,7 @@
     <section id="tab-gw" class="tab active">
       <div class="row">
         <label>Gameweek <select id="gwSelect"></select></label>
+        <button class="secondary" id="fetchFpl" title="Fill in this FPL gameweek's points from the league standings">⬇ Fetch from FPL</button>
         <span class="pill" id="gwQuarter"></span>
         <span class="muted" id="gwStatus"></span>
         <span class="muted" id="paidCount"></span>
@@ -36,6 +37,7 @@
           <tbody id="gwBody"></tbody>
         </table>
       </div>
+      <div class="rules fpl-note" id="fplNote" hidden></div>
       <p class="rules" id="rules"></p>
       <p class="rules" id="gwHint"></p>
       <div class="row">
@@ -100,6 +102,13 @@
         <label>GWs in season <input type="number" id="setTotal" min="1"></label>
       </div>
       <p class="rules" id="prizeCheck"></p>
+
+      <h3>FPL</h3>
+      <div class="grid">
+        <label>Classic league ID <input type="number" id="setLeague" min="1"></label>
+      </div>
+      <p class="rules">The number in the league's address: fantasy.premierleague.com/leagues/<b>292599</b>/standings/c.
+        Players are matched to the league by their FPL manager name, so the names above must be spelled the same.</p>
       <div class="row">
         <button class="primary" id="saveSettings">Save settings</button>
         <span class="muted" id="settingsStatus"></span>

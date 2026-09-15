@@ -1,0 +1,14 @@
+{
+  "name": "efl-fund-tracker",
+  "version": "1.0.0",
+  "description": "Weekly prize and fee tracker for our FPL mini-league",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

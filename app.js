@@ -14,7 +14,8 @@ const DEFAULT_DATA = {
     weeklyFee: 100,
     prizes: [300, 200, 100],
     gameweeksPerQuarter: 9,
-    totalGameweeks: 38
+    totalGameweeks: 38,
+    fplLeagueId: 292599
   },
   players: [
     { id: 'p1', name: 'Friend 1' },
@@ -24,7 +25,8 @@ const DEFAULT_DATA = {
     { id: 'p5', name: 'Friend 5' },
     { id: 'p6', name: 'Friend 6' }
   ],
-  gameweeks: []
+  gameweeks: [],
+  fplSnapshots: {} // gw -> { totals: { playerId: FPL league total }, ... } saved at each FPL fetch
 };
 
 /* ---------- Rules (no DOM) ---------- */
@@ -90,11 +92,46 @@ function summarize(players, gameweeks) {
   return { list, totals };
 }
 
+/* ---------- FPL import (no DOM) ---------- */
+
+// FPL's event_total is a manager's gameweek score *before* transfer hits (−4 per extra transfer),
+// so the real gameweek score is how much their league total grew since the previous gameweek.
+
+const nameKey = s => String(s).trim().replace(/\s+/g, ' ').toLowerCase();
+
+// Finds our players in the league standings by FPL manager name (player_name).
+// -> { found: { playerId: standingsRow }, missing: [names with no single match] }
+function matchFplEntries(players, results) {
+  const found = {}, missing = [];
+  for (const p of players) {
+    const rows = results.filter(r => nameKey(r.player_name) === nameKey(p.name));
+    if (rows.length === 1) found[p.id] = rows[0];
+    else missing.push(p.name);
+  }
+  return { found, missing };
+}
+
+// found: { playerId: standingsRow }, baseline: { playerId: league total after the previous GW }
+// -> { playerId: { points, hits, status } }. status is 'ok'; 'unchanged' when the total hasn't
+// moved (FPL hasn't updated them yet); or 'check' when the numbers don't fit together (hits can
+// only be 0, 4, 8, …), e.g. because the saved previous total was fetched before that GW finished.
+function fplGwScores(found, baseline) {
+  const out = {};
+  for (const [id, row] of Object.entries(found)) {
+    const points = row.total - baseline[id];
+    const hits = row.event_total - points;
+    const status = points === 0 ? 'unchanged' : hits >= 0 && hits % 4 === 0 ? 'ok' : 'check';
+    out[id] = { points, hits, status };
+  }
+  return out;
+}
+
 function normalize(d) {
   if (!d || !Array.isArray(d.players) || !Array.isArray(d.gameweeks)) {
     throw new Error('not an EFL data file (needs "players" and "gameweeks" arrays)');
   }
   d.settings = Object.assign({}, DEFAULT_DATA.settings, d.settings);
+  d.fplSnapshots = d.fplSnapshots || {};
   for (const g of d.gameweeks) {
     g.gw = Number(g.gw);
     g.scores = g.scores || {};
@@ -249,6 +286,7 @@ function renderGwForm(draft) {
   $('#gwHint').textContent = rec
     ? 'Fee paid ticks are saved as soon as you tick them. Changed points need "Save gameweek".'
     : 'Points and Fee paid ticks are saved together when you press "Save gameweek".';
+  renderFplNote();
   syncPaidAll();
   updatePreview();
 }
@@ -346,6 +384,154 @@ function deleteGw() {
   store();
   refreshGwViews();
   flash($('#gwMsg'), `GW ${gw} deleted.`);
+}
+
+/* Fill in gameweek points from FPL (through server.js) */
+
+let fplNote = null; // { gw, html } – details of the last FPL fetch, shown under that gameweek's table
+
+function renderFplNote() {
+  const el = $('#fplNote');
+  el.hidden = !fplNote || fplNote.gw !== shownGw;
+  if (!el.hidden) el.innerHTML = fplNote.html;
+}
+
+async function fplGet(apiPath, notFound) {
+  let res;
+  try {
+    res = await fetch('fpl/' + apiPath, { cache: 'no-store' });
+  } catch (e) {
+    throw new Error('the app server is not answering — is "node server.js" running?');
+  }
+  if (res.status === 404 && notFound) throw new Error(notFound);
+  if (res.status === 503) throw new Error('FPL is being updated right now. Try again in a few minutes.');
+  if (!res.ok) throw new Error(`FPL answered ${res.status} (${(await res.text()).slice(0, 120)})`);
+  return res.json();
+}
+
+async function fetchFromFpl() {
+  const msg = $('#gwMsg');
+  if (!SERVER_MODE) {
+    return flash(msg, 'Fetching from FPL needs the server: run "node server.js" and open http://localhost:3000.', true);
+  }
+  const btn = $('#fetchFpl');
+  btn.disabled = true;
+  clearTimeout(msg.fadeTimer);
+  msg.textContent = 'Fetching from FPL…';
+  msg.className = 'msg';
+  try {
+    await importFplGw();
+  } catch (e) {
+    flash(msg, 'FPL fetch failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// The standings API only shows the current gameweek, and its event_total ignores transfer hits.
+// So every fetch saves each player's league total (data.fplSnapshots[gw]), and a gameweek's
+// points are: total now − total saved for the previous gameweek.
+async function importFplGw() {
+  const boot = await fplGet('bootstrap-static/', 'the running server is out of date — stop it and start "node server.js" again.');
+  const event = boot.events.find(e => e.is_current);
+  if (!event) throw new Error('no FPL gameweek has started yet.');
+  const gw = event.id;
+  const prevGw = gw - 1;
+
+  const leagueId = data.settings.fplLeagueId;
+  let league, results = [];
+  for (let page = 1, more = true; more; page++) {
+    const s = await fplGet(`leagues-classic/${leagueId}/standings/?page_standings=${page}`,
+      `FPL league ${leagueId} was not found — check the league ID in Settings.`);
+    league = s.league;
+    results = results.concat(s.standings.results);
+    more = s.standings.has_next && page < 20;
+  }
+  const { found, missing } = matchFplEntries(data.players, results);
+  const ids = Object.keys(found);
+  if (!ids.length) throw new Error(`none of the players are in "${league.name}" — names must match the FPL manager names.`);
+
+  // League totals after the previous gameweek: from the last fetch saved for it. If there is none
+  // (first use, or a new player), they come from each player's FPL history and are saved too.
+  const baseline = {}, fromHistory = {};
+  for (const id of ids) {
+    if (gw <= league.start_event) baseline[id] = 0;
+    else if (data.fplSnapshots[prevGw] && data.fplSnapshots[prevGw].totals[id] != null) {
+      baseline[id] = data.fplSnapshots[prevGw].totals[id];
+    }
+  }
+  for (const id of ids.filter(id => baseline[id] == null)) {
+    const h = await fplGet(`entry/${found[id].entry}/history/`);
+    fromHistory[id] = baseline[id] = h.current
+      .filter(e => e.event >= league.start_event && e.event < gw)
+      .reduce((sum, e) => sum + e.points - e.event_transfers_cost, 0);
+  }
+  const seeded = Object.keys(fromHistory).map(playerName);
+  if (seeded.length) {
+    const snap = data.fplSnapshots[prevGw] = data.fplSnapshots[prevGw] ||
+      { totals: {}, from: 'FPL history', fetchedAt: new Date().toISOString() };
+    Object.assign(snap.totals, fromHistory);
+  }
+
+  const scores = fplGwScores(found, baseline);
+  const byStatus = status => ids.filter(id => scores[id].status === status);
+  // Same totals as after the previous gameweek for everyone -> FPL hasn't updated this gameweek yet.
+  if (byStatus('unchanged').length === ids.length) {
+    if (seeded.length) { store(); renderJson(); }
+    const text = `FPL hasn't updated GW ${gw} yet — every total is the same as after GW ${prevGw}. Try again later.`;
+    fplNote = { gw, html: `<div class="neg">${text}</div>` };
+    renderFplNote();
+    return flash($('#gwMsg'), text, true);
+  }
+  const last = data.fplSnapshots[gw];
+  const sameAsLast = last && ids.every(id => last.totals[id] === found[id].total);
+  const pick = key => Object.fromEntries(ids.map(id => [id, found[id][key]]));
+  data.fplSnapshots[gw] = { totals: pick('total'), eventTotals: pick('event_total'), fetchedAt: new Date().toISOString() };
+  store();
+  renderJson();
+
+  if (shownGw !== gw) {
+    if (!confirmLeaveGw()) {
+      return flash($('#gwMsg'), `GW ${gw} was fetched but not filled in, because GW ${shownGw} has unsaved changes.`, true);
+    }
+    $('#gwSelect').value = gw;
+    renderGwForm();
+  }
+  // Only numbers that add up are filled in; the rest are left as they were.
+  for (const tr of $$('#gwBody tr')) {
+    const s = scores[tr.dataset.id];
+    if (s && s.status === 'ok') tr.querySelector('.pts').value = s.points;
+  }
+
+  const names = list => list.map(id => esc(playerName(id))).join(', ');
+  const when = iso => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  const lines = [`<b>From FPL “${esc(league.name)}”:</b> GW ${gw} points = league total now − league total after GW ${prevGw}` +
+    (seeded.length ? ` (taken from FPL history for ${esc(seeded.join(', '))}, as no GW ${prevGw} fetch was saved).` : '.')];
+  const hit = byStatus('ok').filter(id => scores[id].hits > 0);
+  if (hit.length) {
+    lines.push('Transfer hits taken off: ' + hit.map(id => {
+      const s = scores[id];
+      return `${esc(playerName(id))} ${found[id].event_total} − ${s.hits} = <b>${s.points}</b>`;
+    }).join(' · '));
+  }
+  if (sameAsLast) lines.push(`No change since the last fetch (${when(last.fetchedAt)}).`);
+  if (!(event.finished && event.data_checked)) {
+    lines.push(`<span class="warn">GW ${gw} is not final on FPL yet — points can still change. Fetch again once it is finished, before paying out.</span>`);
+  }
+  if (byStatus('unchanged').length) {
+    lines.push(`<span class="neg">FPL hasn't updated these players yet (left as they were): ${names(byStatus('unchanged'))}.</span>`);
+  }
+  for (const id of byStatus('check')) {
+    lines.push(`<span class="neg">Check ${esc(playerName(id))} on FPL and type their points in: total went up by ${scores[id].points}, ` +
+      `but FPL shows ${found[id].event_total} GW points, which doesn't match any transfer hit.</span>`);
+  }
+  if (missing.length) {
+    lines.push(`<span class="neg">Not found in the league (the name must match the FPL manager name): ${esc(missing.join(', '))}.</span>`);
+  }
+  fplNote = { gw, html: lines.map(l => `<div>${l}</div>`).join('') };
+  renderFplNote();
+  updatePreview();
+  flash($('#gwMsg'), `GW ${gw} points filled in from FPL. Check them, then press "Save gameweek".`);
 }
 
 /* Share a saved gameweek with the group */
@@ -539,6 +725,7 @@ function renderSettings() {
   $('#setP3').value = s.prizes[2];
   $('#setPerQ').value = s.gameweeksPerQuarter;
   $('#setTotal').value = s.totalGameweeks;
+  $('#setLeague').value = s.fplLeagueId;
   onSettingsEdit();
 }
 
@@ -551,7 +738,8 @@ function settingsDirty() {
   const s = data.settings;
   const names = $$('.pname');
   const numbers = [['#setFee', s.weeklyFee], ['#setP1', s.prizes[0]], ['#setP2', s.prizes[1]],
-    ['#setP3', s.prizes[2]], ['#setPerQ', s.gameweeksPerQuarter], ['#setTotal', s.totalGameweeks]];
+    ['#setP3', s.prizes[2]], ['#setPerQ', s.gameweeksPerQuarter], ['#setTotal', s.totalGameweeks],
+    ['#setLeague', s.fplLeagueId]];
   return names.length !== data.players.length ||
     names.some((i, k) => i.dataset.id !== data.players[k].id || i.value.trim() !== data.players[k].name) ||
     numbers.some(([id, v]) => Number($(id).value) !== v);
@@ -584,10 +772,11 @@ function saveSettings() {
     weeklyFee: num('#setFee'),
     prizes: [num('#setP1'), num('#setP2'), num('#setP3')],
     gameweeksPerQuarter: num('#setPerQ'),
-    totalGameweeks: num('#setTotal')
+    totalGameweeks: num('#setTotal'),
+    fplLeagueId: num('#setLeague')
   };
-  const badCounts = ![s.gameweeksPerQuarter, s.totalGameweeks].every(Number.isInteger) ||
-    s.gameweeksPerQuarter < 1 || s.totalGameweeks < s.gameweeksPerQuarter;
+  const badCounts = ![s.gameweeksPerQuarter, s.totalGameweeks, s.fplLeagueId].every(Number.isInteger) ||
+    s.gameweeksPerQuarter < 1 || s.totalGameweeks < s.gameweeksPerQuarter || s.fplLeagueId < 1;
   if (!(s.weeklyFee >= 0) || s.prizes.some(p => !(p >= 0)) || badCounts) {
     return flash(msg, 'Please check the numbers.', true);
   }
@@ -681,6 +870,7 @@ async function init() {
   $('#gwBody').addEventListener('input', updatePreview);
   $('#gwBody').addEventListener('change', onPaidChange);
   $('#paidAll').addEventListener('change', onPaidChange);
+  $('#fetchFpl').addEventListener('click', fetchFromFpl);
   $('#saveGw').addEventListener('click', saveGw);
   $('#deleteGw').addEventListener('click', deleteGw);
   $('#shareGw').addEventListener('click', openShare);
@@ -729,4 +919,4 @@ async function init() {
 }
 
 if (typeof document !== 'undefined') init();
-if (typeof module !== 'undefined') module.exports = { computePayouts, quarterOf, quarterRange, summarize };
+if (typeof module !== 'undefined') module.exports = { computePayouts, quarterOf, quarterRange, summarize, matchFplEntries, fplGwScores };

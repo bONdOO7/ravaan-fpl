@@ -13,29 +13,29 @@
   "players": [
     {
       "id": "p1",
-      "name": "Sagar"
+      "name": "Vaibhav Hadawale"
     },
     {
       "id": "p2",
-      "name": "Nikhil"
+      "name": "Nikhil Gawde"
     },
     {
       "id": "p3",
-      "name": "JD"
+      "name": "Sagar Gadhari"
     },
     {
       "id": "p4",
-      "name": "Vabby"
+      "name": "Jayesh Dhanawde"
     },
     {
       "id": "p5",
-      "name": "Ronak"
+      "name": "Ronak Gandhi"
     },
     {
       "id": "p6",
-      "name": "Veta"
+      "name": "Snehaldeep Veta"
     }
   ],
   "gameweeks": [],
-  "updatedAt": "2026-09-15T09:07:22.575Z"
+  "updatedAt": "2026-09-15T09:38:00.322Z"
 }
