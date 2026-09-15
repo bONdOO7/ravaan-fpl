@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EFL Fund Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>⚽ EFL Fund Tracker</h1>
+    <p class="sub" id="summaryLine"></p>
+    <p class="save-warning" id="saveWarning" hidden>⚠ Changes are not reaching data.json — is <code>node server.js</code> running? They are kept in this browser for now.</p>
+    <nav>
+      <button data-tab="gw" class="active">Gameweek</button>
+      <button data-tab="standings">Standings</button>
+      <button data-tab="history">History</button>
+      <button data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Enter / edit one gameweek -->
+    <section id="tab-gw" class="tab active">
+      <div class="row">
+        <label>Gameweek <select id="gwSelect"></select></label>
+        <span class="pill" id="gwQuarter"></span>
+        <span class="muted" id="gwStatus"></span>
+        <span class="muted" id="paidCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Player</th><th>GW points</th><th class="c"><label class="th-check" title="Tick to mark everyone as paid"><input type="checkbox" id="paidAll"> Fee paid</label></th><th class="c">Rank</th><th class="r">Prize</th></tr>
+          </thead>
+          <tbody id="gwBody"></tbody>
+        </table>
+      </div>
+      <p class="rules" id="rules"></p>
+      <p class="rules" id="gwHint"></p>
+      <div class="row">
+        <button class="primary" id="saveGw">Save gameweek</button>
+        <button class="secondary" id="shareGw">📤 Share summary</button>
+        <button class="danger" id="deleteGw">Delete</button>
+        <span class="msg" id="gwMsg"></span>
+      </div>
+      <div class="share" id="sharePanel" hidden>
+        <textarea id="shareText" aria-label="Gameweek summary"></textarea>
+        <div class="row">
+          <button class="primary" id="copyShare">📋 Copy</button>
+          <a class="button secondary" id="waShare" target="_blank" rel="noopener">Open in WhatsApp</a>
+          <button class="icon" id="closeShare">Close</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quarter / season totals -->
+    <section id="tab-standings" class="tab">
+      <div class="row"><label>Period <select id="periodSelect"></select></label></div>
+      <div class="cards" id="poolCards"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Player</th><th class="r">GWs</th><th class="r">Points</th>
+              <th class="c">🥇</th><th class="c">🥈</th><th class="c">🥉</th>
+              <th class="r">Contribution</th><th class="r">Won</th><th class="r">Net</th><th class="r">Owes</th>
+            </tr>
+          </thead>
+          <tbody id="standingsBody"></tbody>
+        </table>
+      </div>
+      <p class="rules">Contribution = weekly fee × gameweeks played. Net = Won − Contribution. Owes = fees not yet marked as paid.</p>
+    </section>
+
+    <!-- Every saved gameweek -->
+    <section id="tab-history" class="tab">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>GW</th><th>Qtr</th><th>Prize winners</th><th>Yet to pay</th></tr></thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+      <p class="rules">Click a row to open that gameweek.</p>
+    </section>
+
+    <!-- Players, money rules, JSON data -->
+    <section id="tab-settings" class="tab">
+      <h3>Players</h3>
+      <div id="playerInputs"></div>
+      <button class="secondary" id="addPlayer">+ Add player</button>
+
+      <h3>Money</h3>
+      <div class="grid">
+        <label>Weekly fee (₹) <input type="number" id="setFee" min="0"></label>
+        <label>1st prize (₹) <input type="number" id="setP1" min="0"></label>
+        <label>2nd prize (₹) <input type="number" id="setP2" min="0"></label>
+        <label>3rd prize (₹) <input type="number" id="setP3" min="0"></label>
+        <label>GWs per quarter <input type="number" id="setPerQ" min="1"></label>
+        <label>GWs in season <input type="number" id="setTotal" min="1"></label>
+      </div>
+      <p class="rules" id="prizeCheck"></p>
+      <div class="row">
+        <button class="primary" id="saveSettings">Save settings</button>
+        <span class="muted" id="settingsStatus"></span>
+        <span class="msg" id="settingsMsg"></span>
+      </div>
+
+      <h3>Data (JSON)</h3>
+      <p class="rules" id="storageStatus"></p>
+      <div class="row">
+        <button class="secondary" id="exportJson">⬇ Export JSON</button>
+        <label class="button secondary">⬆ Import JSON <input type="file" id="importFile" accept=".json,application/json" hidden></label>
+        <button class="danger" id="resetData">Reset all</button>
+        <span class="msg" id="dataMsg"></span>
+      </div>
+      <details>
+        <summary>View raw JSON</summary>
+        <textarea id="jsonView" readonly></textarea>
+      </details>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
