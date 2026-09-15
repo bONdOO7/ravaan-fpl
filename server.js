@@ -8,6 +8,8 @@
  * Optional environment variables (see README → Put it online):
  *   PORT          port to listen on (default 3000; hosting services set it for you)
  *   EFL_PASSWORD  password for opening the app; without it only this computer can open it
+ *   EFL_EDITORS   who may change points and settings, with their own passwords: "Sagar:pass1,Nikhil:pass2";
+ *                   everyone else (EFL_PASSWORD, any user name) can only view
  *   DATA_FILE     where the data is saved (default: data.json next to this file)
  *   GIST_ID       keep the data in this GitHub gist instead of DATA_FILE (for hosts without a disk);
  *   GITHUB_TOKEN    together with a GitHub token that is allowed to edit gists
@@ -22,8 +24,14 @@ const path = require('path');
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 3000;
 const PASSWORD = process.env.EFL_PASSWORD || '';
-// Without a password the data must stay private, so the server only listens to this computer.
-const HOST = process.env.HOST || (PASSWORD ? '0.0.0.0' : '127.0.0.1');
+// "Sagar:pass1,Nikhil:pass2" -> [{ name: 'Sagar', password: 'pass1' }, …]
+const EDITORS = (process.env.EFL_EDITORS || '').split(',').map(s => s.trim()).filter(Boolean).map(entry => {
+  const i = entry.indexOf(':');
+  return { name: i > 0 ? entry.slice(0, i).trim() : '', password: i > 0 ? entry.slice(i + 1) : '' };
+});
+const AUTH = Boolean(PASSWORD || EDITORS.length);
+// Without a login the data must stay private, so the server only listens to this computer.
+const HOST = process.env.HOST || (AUTH ? '0.0.0.0' : '127.0.0.1');
 const SEED_FILE = path.join(ROOT, 'data.json');
 const DATA_FILE = path.resolve(process.env.DATA_FILE || SEED_FILE);
 const GIST_ID = process.env.GIST_ID || '';
@@ -44,9 +52,13 @@ const TYPES = {
 // Set by hosting services (Render, Fly.io, Heroku, Cloud Run, Railway). There, a missing password would
 // otherwise only show up as "no open port" after a long wait, so stop straight away with the reason.
 const HOSTED = ['RENDER', 'FLY_APP_NAME', 'DYNO', 'K_SERVICE', 'RAILWAY_ENVIRONMENT_NAME'].some(v => process.env[v]);
-if (HOSTED && !PASSWORD && !process.env.HOST) {
+if (HOSTED && !AUTH && !process.env.HOST) {
   console.error('EFL_PASSWORD is not set. Online the app needs a password, otherwise anyone could change the data.\n' +
     'Add the environment variable EFL_PASSWORD in your hosting dashboard, then deploy again.');
+  process.exit(1);
+}
+if (EDITORS.some(e => !e.name || !e.password)) {
+  console.error('EFL_EDITORS must look like "Sagar:password1,Nikhil:password2" (a name and a password for each editor).');
   process.exit(1);
 }
 if (!GIST_ID !== !GITHUB_TOKEN) {
@@ -111,15 +123,29 @@ function gistStorage() {
 const storage = GIST_ID ? gistStorage() : fileStorage();
 let saving = Promise.resolve(); // saves run one after another, in the order they arrive
 
-// With EFL_PASSWORD set, the browser asks for it once (any user name) and then remembers it.
-function authorized(req) {
-  if (!PASSWORD) return true;
-  const [scheme, value] = (req.headers.authorization || '').split(' ');
-  if (scheme !== 'Basic' || !value) return false;
-  const login = Buffer.from(value, 'base64').toString('utf8');
+const samePassword = (a, b) => {
   const hash = s => crypto.createHash('sha256').update(s).digest();
-  return crypto.timingSafeEqual(hash(login.slice(login.indexOf(':') + 1)), hash(PASSWORD));
+  return crypto.timingSafeEqual(hash(a), hash(b));
+};
+
+// Who is asking: { user, canEdit }, or null when the login is wrong. The browser asks for a user name
+// and password once and then remembers them. Editors log in with their name and their own password;
+// everyone else with EFL_PASSWORD and any user name, and can only view (unless EFL_EDITORS is not set).
+function login(req) {
+  if (!AUTH) return { user: null, canEdit: true };
+  const [scheme, value] = (req.headers.authorization || '').split(' ');
+  if (scheme !== 'Basic' || !value) return null;
+  const text = Buffer.from(value, 'base64').toString('utf8');
+  const i = text.indexOf(':');
+  if (i < 0) return null;
+  const name = text.slice(0, i).trim(), password = text.slice(i + 1);
+  const editor = EDITORS.find(e => e.name.toLowerCase() === name.toLowerCase());
+  if (editor && samePassword(password, editor.password)) return { user: editor.name, canEdit: true };
+  if (PASSWORD && samePassword(password, PASSWORD)) return { user: name || null, canEdit: !EDITORS.length };
+  return null;
 }
+
+const editorNames = () => EDITORS.map(e => e.name).join(' and ');
 
 function sendData(res) {
   storage.read().then(text => {
@@ -193,13 +219,22 @@ function proxyFpl(req, res) {
 http.createServer((req, res) => {
   // For hosting services checking that the app is up; needs no password.
   if (req.url === '/healthz') return res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok');
-  if (!authorized(req)) {
+  const who = login(req);
+  if (!who) {
     return res.writeHead(401, {
       'WWW-Authenticate': 'Basic realm="EFL Fund Tracker", charset="UTF-8"',
       'Content-Type': 'text/plain'
     }).end('Password required');
   }
-  if (req.method === 'PUT' && req.url === '/data.json') return saveData(req, res);
+  // Tells the app whether to let this person change anything.
+  if (req.method === 'GET' && req.url === '/whoami') {
+    return res.writeHead(200, { 'Content-Type': TYPES['.json'], 'Cache-Control': 'no-store' })
+      .end(JSON.stringify({ ...who, editors: EDITORS.map(e => e.name) }));
+  }
+  if (req.method === 'PUT' && req.url === '/data.json') {
+    if (!who.canEdit) return res.writeHead(403, { 'Content-Type': 'text/plain' }).end(`Only ${editorNames()} can change the data.`);
+    return saveData(req, res);
+  }
   if (req.method === 'GET' && req.url === '/data.json') return sendData(res);
   if (req.method === 'GET' && req.url.startsWith('/fpl/')) return proxyFpl(req, res);
   if (req.method === 'GET') return serveFile(req, res);
@@ -211,9 +246,11 @@ http.createServer((req, res) => {
   })
   .listen(PORT, HOST, () => {
     console.log(`EFL Fund Tracker: http://localhost:${PORT}  (saving to ${storage.where})`);
-    if (PASSWORD) console.log(`Password protected, listening on ${HOST}.`);
+    if (AUTH) console.log(`Password protected, listening on ${HOST}.`);
     else if (HOST === '127.0.0.1') console.log('Only this computer can open it. To use it from other devices or host it online, set EFL_PASSWORD.');
     else console.log(`⚠ Listening on ${HOST} without EFL_PASSWORD: anyone who can reach this server can change the data.`);
+    if (EDITORS.length) console.log(`Only ${editorNames()} can change points and settings; everyone else can only view.`);
+    else if (PASSWORD) console.log('⚠ EFL_EDITORS is not set, so everyone with the password can change points and settings.');
     // Check the gist settings straight away, so a wrong GIST_ID or token shows up in the log.
     if (GIST_ID) {
       storage.read().then(() => console.log('Connected to the gist.'),

@@ -21,18 +21,19 @@ The server runs on any host that runs Node.js 18+ (Render, Railway, Fly.io, a VP
 
 | Variable | What it does |
 |---|---|
-| `EFL_PASSWORD` | **Needed online.** The browser asks for it once (any user name works). Without it, the server only answers the computer it runs on. |
+| `EFL_PASSWORD` | **Needed online.** The password for everyone in the group. The browser asks for it once (any user name works). Without it, the server only answers the computer it runs on. |
+| `EFL_EDITORS` | **Who can change points and settings**, each with their own password: `Sagar:sagars-password,Nikhil:nikhils-password` (no commas in the passwords). They log in with that name and password. Everyone who logs in with `EFL_PASSWORD` can only view: every field is disabled for them and the server refuses their changes. Without `EFL_EDITORS`, everyone with `EFL_PASSWORD` can change everything. |
 | `DATA_FILE` | Where the data is saved, e.g. `/var/data/data.json`. Put it on the host's **persistent disk / volume**, because most hosts wipe other files on every restart or deploy. The first time, it starts as a copy of this folder's `data.json`. |
 | `GIST_ID`, `GITHUB_TOKEN` | For hosts **without** a persistent disk (like Render's free plan): keep the data in a GitHub gist instead of `DATA_FILE`. See "On Render's free plan" below. |
 | `PORT` | Port to listen on. Hosting services set this themselves; the default is 3000. |
 | `HOST` | Address to listen on. Default `0.0.0.0` when `EFL_PASSWORD` is set, otherwise `127.0.0.1`. |
 
-**On a Node.js host:** create a web service from this repo with build command `npm install` and start command `npm start`. Add a persistent disk (for example mounted at `/var/data`), and set `EFL_PASSWORD` and `DATA_FILE=/var/data/data.json`. If the host asks for a health check path, use `/healthz`. On Render, Fly.io, Heroku, Railway and Cloud Run the server stops at start-up with a clear message when `EFL_PASSWORD` is missing, and warns when there is no `DATA_FILE` or gist.
+**On a Node.js host:** create a web service from this repo with build command `npm install` and start command `npm start`. Add a persistent disk (for example mounted at `/var/data`), and set `EFL_PASSWORD`, `EFL_EDITORS` and `DATA_FILE=/var/data/data.json`. If the host asks for a health check path, use `/healthz`. On Render, Fly.io, Heroku, Railway and Cloud Run the server stops at start-up with a clear message when `EFL_PASSWORD` is missing, and warns when there is no `DATA_FILE` or gist.
 
 **On Render's free plan** there are no disks, and every restart (including the one after the app has slept) resets the files to what's in the repo. So keep the data in a GitHub gist:
 1. On [gist.github.com](https://gist.github.com), create a **secret** gist with one file named `data.json`, and paste in the contents of your current `data.json`. The gist ID is the last part of its address: gist.github.com/your-name/**3f2a9c…**
 2. Create a token: GitHub → Settings → Developer settings → Personal access tokens → **Tokens (classic)** → Generate new token. Tick only the **gist** box.
-3. In the Render service → **Environment**, set `EFL_PASSWORD`, `GIST_ID` and `GITHUB_TOKEN`, then deploy. The log should say `Connected to the gist.`
+3. In the Render service → **Environment**, set `EFL_PASSWORD`, `EFL_EDITORS`, `GIST_ID` and `GITHUB_TOKEN`, then deploy. The log should say `Connected to the gist.`
 
 Every save becomes a revision of the gist, so the gist's **Revisions** tab shows each change and lets you copy back an older version (restart the service afterwards). A secret gist is not listed anywhere, but anyone who has its address can read it. When the token expires, saving stops with an error until you put a new token in `GITHUB_TOKEN`.
 
@@ -41,13 +42,16 @@ Every save becomes a revision of the gist, so the gist's **Revisions** tab shows
 **With Docker:**
 ```sh
 docker build -t efl .
-docker run -d --name efl -p 3000:3000 -e EFL_PASSWORD=choose-a-password -v efl-data:/data efl
+docker run -d --name efl -p 3000:3000 -e EFL_PASSWORD=choose-a-password \
+  -e EFL_EDITORS="Sagar:sagars-password,Nikhil:nikhils-password" -v efl-data:/data efl
 ```
 The data is kept in the `efl-data` volume, so it survives rebuilding the image.
 
 Good to know:
 - Open it over **https** (hosting services provide this) so the password isn't sent in plain text.
-- Everyone with the password can change the data. If two people save at the same moment, the last save wins.
+- Only the editors in `EFL_EDITORS` can change points, fee ticks and settings. If two editors save at the same moment, the last save wins.
+- The browser remembers a login until it is closed. To log in as someone else (for example as an editor after viewing), close the browser or use a private window.
+- Run locally without a password, the app has no logins, so whoever uses that computer can change everything.
 - Without a persistent disk or a gist, the data is lost when the host restarts the app. The next browser that opens it writes its own backup copy back, but that copy may be out of date.
 
 ## Fetching points from FPL

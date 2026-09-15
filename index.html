@@ -11,6 +11,7 @@
     <h1>⚽ EFL Fund Tracker</h1>
     <p class="sub" id="summaryLine"></p>
     <p class="save-warning" id="saveWarning" hidden>⚠ Changes are not reaching data.json — is <code>node server.js</code> running? They are kept in this browser for now.</p>
+    <p class="access-note" id="accessNote" hidden></p>
     <nav>
       <button data-tab="gw" class="active">Gameweek</button>
       <button data-tab="standings">Standings</button>
@@ -119,7 +120,7 @@
       <p class="rules" id="storageStatus"></p>
       <div class="row">
         <button class="secondary" id="exportJson">⬇ Export JSON</button>
-        <label class="button secondary">⬆ Import JSON <input type="file" id="importFile" accept=".json,application/json" hidden></label>
+        <label class="button secondary" id="importButton">⬆ Import JSON <input type="file" id="importFile" accept=".json,application/json" hidden></label>
         <button class="danger" id="resetData">Reset all</button>
         <span class="msg" id="dataMsg"></span>
       </div>

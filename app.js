@@ -154,6 +154,7 @@ const signed = n => (n > 0 ? '+' : n < 0 ? '−' : '') + money(Math.abs(n));
 const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const medal = rank => ['🥇', '🥈', '🥉'][rank - 1] || '';
+const andList = names => (names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names.join(''));
 
 let data;
 let shownGw = 0; // gameweek currently loaded in the form
@@ -162,7 +163,13 @@ let shownGw = 0; // gameweek currently loaded in the form
 const SERVER_MODE = typeof location !== 'undefined' && location.protocol.startsWith('http');
 let fileQueue = Promise.resolve();
 
+// Who is logged in (from server.js) and whether they may change anything — only the editors named in
+// EFL_EDITORS can. Opened as a file there is no login, so everything can be changed.
+let access = { user: null, canEdit: true, editors: [] };
+const lock = () => (access.canEdit ? '' : 'disabled');
+
 function store() {
+  if (!access.canEdit) return; // the server refuses saves from viewers anyway
   data.updatedAt = new Date().toISOString();
   const json = JSON.stringify(data, null, 2);
   try {
@@ -186,6 +193,9 @@ function renderStorageStatus(fileOk) {
   if (!SERVER_MODE) {
     el.textContent = 'Saved in this browser only — data.json is not changed when index.html is opened directly. ' +
       'To keep data.json up to date, run "node server.js" in the app folder and open http://localhost:3000.';
+    el.className = 'rules';
+  } else if (!access.canEdit) {
+    el.textContent = `View only — ${andList(access.editors)} keep the data up to date.`;
     el.className = 'rules';
   } else if (fileOk) {
     el.textContent = '✓ Every change is saved to data.json (with a backup copy in this browser).';
@@ -256,7 +266,7 @@ function renderGwForm(draft) {
   const prizes = rec ? rec.prizes : data.settings.prizes;
   shownGw = gw;
   $('#gwQuarter').textContent = `Quarter ${quarterOf(gw, data.settings)}`;
-  $('#deleteGw').hidden = !rec;
+  $('#deleteGw').hidden = !rec || !access.canEdit;
   $('#shareGw').hidden = !rec;
   $('#sharePanel').hidden = true;
   $('#gwMsg').textContent = '';
@@ -265,8 +275,8 @@ function renderGwForm(draft) {
     const paid = rec && rec.paid[p.id] ? 'checked' : '';
     return `<tr data-id="${esc(p.id)}">
       <td>${esc(p.name)}</td>
-      <td><input type="number" class="pts" step="1" inputmode="numeric" value="${pts}"></td>
-      <td class="c"><input type="checkbox" class="paid" ${paid}></td>
+      <td><input type="number" class="pts" step="1" inputmode="numeric" value="${pts}" ${lock()}></td>
+      <td class="c"><input type="checkbox" class="paid" ${paid} ${lock()}></td>
       <td class="c rank">–</td>
       <td class="r prize"></td>
     </tr>`;
@@ -283,8 +293,8 @@ function renderGwForm(draft) {
     `Prizes: 1st ${money(prizes[0])} · 2nd ${money(prizes[1])} · 3rd ${money(prizes[2])}. ` +
     `Tied players split the prizes of the places they share equally — e.g. a tie for 2nd pays ` +
     `(${prizes[1]} + ${prizes[2]}) ÷ 2 = ${money((prizes[1] + prizes[2]) / 2)} each.`;
-  $('#gwHint').textContent = rec
-    ? 'Fee paid ticks are saved as soon as you tick them. Changed points need "Save gameweek".'
+  $('#gwHint').textContent = !access.canEdit ? ''
+    : rec ? 'Fee paid ticks are saved as soon as you tick them. Changed points need "Save gameweek".'
     : 'Points and Fee paid ticks are saved together when you press "Save gameweek".';
   renderFplNote();
   syncPaidAll();
@@ -650,9 +660,10 @@ function renderStandings() {
 
   $('#standingsBody').innerHTML = gws.length ? list.map((r, i) => {
     const net = r.won - r.contribution;
-    const owes = r.owes
-      ? `${money(r.owes)} <button class="link settle" data-id="${esc(r.id)}" title="Mark all of these fees as paid">Mark paid</button>`
-      : '–';
+    const settle = access.canEdit
+      ? ` <button class="link settle" data-id="${esc(r.id)}" title="Mark all of these fees as paid">Mark paid</button>`
+      : '';
+    const owes = r.owes ? money(r.owes) + settle : '–';
     return `<tr>
       <td>${i + 1}</td>
       <td>${esc(r.name)}</td>
@@ -711,8 +722,8 @@ function renderHistory() {
 
 function playerRow(p) {
   return `<div class="prow">
-      <input type="text" class="pname" data-id="${esc(p.id)}" value="${esc(p.name)}" placeholder="Player name">
-      <button class="icon removePlayer" title="Remove player">✕</button>
+      <input type="text" class="pname" data-id="${esc(p.id)}" value="${esc(p.name)}" placeholder="Player name" ${lock()}>
+      <button class="icon removePlayer" title="Remove player" ${access.canEdit ? '' : 'hidden'}>✕</button>
     </div>`;
 }
 
@@ -837,6 +848,17 @@ function resetData() {
 
 /* Start-up */
 
+// Viewers still see everything, but every field is disabled and the buttons that change data are hidden.
+// (Fields drawn later — gameweek rows, player names — use lock() themselves.)
+function renderAccess() {
+  const viewOnly = !access.canEdit;
+  $('#accessNote').hidden = !viewOnly;
+  $('#accessNote').textContent = `👀 View only${access.user ? ` (logged in as ${access.user})` : ''} — ` +
+    `only ${andList(access.editors)} can change points and settings.`;
+  $$('#tab-settings .grid input, #paidAll').forEach(el => { el.disabled = viewOnly; });
+  $$('#fetchFpl, #saveGw, #addPlayer, #saveSettings, #importButton, #resetData').forEach(el => { el.hidden = viewOnly; });
+}
+
 function showTab(name) {
   $$('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   $$('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-' + name));
@@ -851,16 +873,24 @@ async function init() {
   } catch (e) {
     console.warn('Could not read saved data', e);
   }
+  let serverCopy = null;
   if (SERVER_MODE) {
     try {
+      const res = await fetch('whoami', { cache: 'no-store' });
+      if (res.ok) access = await res.json();
+    } catch (e) {
+      console.warn('Could not check who is logged in', e);
+    }
+    try {
       const res = await fetch('data.json', { cache: 'no-store' });
-      if (res.ok) copies.push(normalize(await res.json()));
+      if (res.ok) copies.push(serverCopy = normalize(await res.json()));
     } catch (e) {
       console.warn('Could not load data.json', e);
     }
   }
   copies.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  data = copies[0] || clone(DEFAULT_DATA);
+  // Viewers never save, so this browser's copy may be out of date: they always see the server's copy.
+  data = (!access.canEdit && serverCopy) || copies[0] || clone(DEFAULT_DATA);
 
   $$('nav button').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
   $('#gwSelect').addEventListener('change', () => {
@@ -912,10 +942,11 @@ async function init() {
     }
   });
 
+  renderAccess();
   renderAll();
   renderStorageStatus(true);
   // Bring data.json in line with the copy in use (this also checks the server accepts saves).
-  if (SERVER_MODE) saveToFile(JSON.stringify(data, null, 2));
+  if (SERVER_MODE && access.canEdit) saveToFile(JSON.stringify(data, null, 2));
 }
 
 if (typeof document !== 'undefined') init();
