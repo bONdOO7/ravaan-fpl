@@ -26,7 +26,9 @@ The server runs on any host that runs Node.js 18+ (Render, Railway, Fly.io, a VP
 | `PORT` | Port to listen on. Hosting services set this themselves; the default is 3000. |
 | `HOST` | Address to listen on. Default `0.0.0.0` when `EFL_PASSWORD` is set, otherwise `127.0.0.1`. |
 
-**On a Node.js host:** create a web service from this repo with build command `npm install` and start command `npm start`. Add a persistent disk (for example mounted at `/var/data`), and set `EFL_PASSWORD` and `DATA_FILE=/var/data/data.json`. If the host asks for a health check path, use `/healthz`.
+**On a Node.js host:** create a web service from this repo with build command `npm install` and start command `npm start`. Add a persistent disk (for example mounted at `/var/data`), and set `EFL_PASSWORD` and `DATA_FILE=/var/data/data.json`. If the host asks for a health check path, use `/healthz`. On Render, Fly.io, Heroku, Railway and Cloud Run the server stops at start-up with a clear message when `EFL_PASSWORD` is missing, and warns when `DATA_FILE` is.
+
+**On Render:** Service → **Environment** → add `EFL_PASSWORD`. For the data to survive restarts, add a **Disk** (Service → Disks, mount path `/var/data`) and set `DATA_FILE=/var/data/data.json`. Disks need a paid instance type. On the free plan the app is put to sleep when nobody uses it, and each restart resets the data to the `data.json` in the repo.
 
 **With Docker:**
 ```sh

@@ -8,7 +8,8 @@
       100
     ],
     "gameweeksPerQuarter": 9,
-    "totalGameweeks": 38
+    "totalGameweeks": 38,
+    "fplLeagueId": 292599
   },
   "players": [
     {
@@ -36,6 +37,108 @@
       "name": "Snehaldeep Veta"
     }
   ],
-  "gameweeks": [],
-  "updatedAt": "2026-09-15T09:38:00.322Z"
+  "gameweeks": [
+    {
+      "gw": 1,
+      "scores": {
+        "p1": 57,
+        "p2": 45,
+        "p3": 74,
+        "p4": 47,
+        "p5": 41,
+        "p6": 42
+      },
+      "paid": {
+        "p1": true,
+        "p2": true,
+        "p3": true,
+        "p4": true,
+        "p5": true,
+        "p6": true
+      },
+      "fee": 100,
+      "prizes": [
+        300,
+        200,
+        100
+      ]
+    },
+    {
+      "gw": 2,
+      "scores": {
+        "p1": 98,
+        "p2": 113,
+        "p3": 80,
+        "p4": 59,
+        "p5": 101,
+        "p6": 85
+      },
+      "paid": {
+        "p1": true,
+        "p2": true,
+        "p3": true,
+        "p4": true,
+        "p5": true,
+        "p6": true
+      },
+      "fee": 100,
+      "prizes": [
+        300,
+        200,
+        100
+      ]
+    },
+    {
+      "gw": 3,
+      "scores": {
+        "p1": 67,
+        "p2": 52,
+        "p3": 75,
+        "p4": 66,
+        "p5": 43,
+        "p6": 56
+      },
+      "paid": {
+        "p1": true,
+        "p2": true,
+        "p3": true,
+        "p4": true,
+        "p5": true,
+        "p6": true
+      },
+      "fee": 100,
+      "prizes": [
+        300,
+        200,
+        100
+      ]
+    },
+    {
+      "gw": 4,
+      "scores": {
+        "p1": 89,
+        "p2": 80,
+        "p3": 68,
+        "p4": 66,
+        "p5": 61,
+        "p6": 60
+      },
+      "paid": {
+        "p1": true,
+        "p2": true,
+        "p3": true,
+        "p4": true,
+        "p5": true,
+        "p6": true
+      },
+      "fee": 100,
+      "prizes": [
+        300,
+        200,
+        100
+      ]
+    }
+  ],
+  "updatedAt": "2026-09-15T10:38:46.257Z",
+  "fplSnapshots": {}
 }

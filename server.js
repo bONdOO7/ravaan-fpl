@@ -36,6 +36,19 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8'
 };
 
+// Set by hosting services (Render, Fly.io, Heroku, Cloud Run, Railway). There, a missing password would
+// otherwise only show up as "no open port" after a long wait, so stop straight away with the reason.
+const HOSTED = ['RENDER', 'FLY_APP_NAME', 'DYNO', 'K_SERVICE', 'RAILWAY_ENVIRONMENT_NAME'].some(v => process.env[v]);
+if (HOSTED && !PASSWORD && !process.env.HOST) {
+  console.error('EFL_PASSWORD is not set. Online the app needs a password, otherwise anyone could change the data.\n' +
+    'Add the environment variable EFL_PASSWORD in your hosting dashboard, then deploy again.');
+  process.exit(1);
+}
+if (HOSTED && !process.env.DATA_FILE) {
+  console.warn('⚠ DATA_FILE is not set, so data is saved inside the app folder, which most hosts wipe on every restart or deploy.\n' +
+    '  Set DATA_FILE to a file on a persistent disk, e.g. /var/data/data.json (see README → Put it online).');
+}
+
 // A new DATA_FILE (e.g. on a fresh persistent disk) starts as a copy of the data.json shipped with the app.
 fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
 if (!fs.existsSync(DATA_FILE) && fs.existsSync(SEED_FILE)) fs.copyFileSync(SEED_FILE, DATA_FILE);
