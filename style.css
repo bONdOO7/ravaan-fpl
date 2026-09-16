@@ -113,3 +113,11 @@ button:disabled { opacity: .6; cursor: progress; }
 /* Everyone except the editors: header notice, and fields they can't change */
 .access-note { display: inline-block; margin: 0 0 10px; padding: 4px 10px; border-radius: 6px; background: rgba(255,255,255,.15); font-size: 13px; }
 input:disabled { background: var(--bg); color: var(--muted); cursor: not-allowed; }
+
+/* Player name with club badge and FPL team name */
+.player { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.badge { width: 28px; height: 28px; flex: none; border-radius: 50%; object-fit: contain; background: #fff; }
+.badge-default { display: inline-flex; align-items: center; justify-content: center; background: #efe6f0; color: var(--brand); font-size: 11px; font-weight: 700; }
+.pinfo { display: flex; flex-direction: column; line-height: 1.2; }
+.pn { white-space: nowrap; }
+.team { font-size: 12px; color: var(--muted); white-space: nowrap; }

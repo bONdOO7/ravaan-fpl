@@ -215,7 +215,21 @@ function flash(el, text, isError) {
 }
 
 const findGw = gw => data.gameweeks.find(g => g.gw === gw);
-const playerName = id => (data.players.find(p => p.id === id) || { name: id }).name;
+const findPlayer = id => data.players.find(p => p.id === id) || { id, name: id };
+const playerName = id => findPlayer(id).name;
+
+// Club badge (or an initials circle when FPL has none / it fails to load), name and FPL team name.
+// Badge and team name are saved on the player at each FPL fetch, so viewers see them too.
+function badge(p) {
+  const initials = esc(p.name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase());
+  const fallback = `<span class="badge badge-default" aria-hidden="true">${initials}</span>`;
+  return p.badge ? `<img class="badge" src="${esc(p.badge)}" alt="" loading="lazy" data-initials="${initials}">` : fallback;
+}
+function playerCell(id) {
+  const p = findPlayer(id);
+  return `<span class="player">${badge(p)}<span class="pinfo"><span class="pn">${esc(p.name)}</span>` +
+    (p.teamName ? `<span class="team">${esc(p.teamName)}</span>` : '') + '</span></span>';
+}
 const selectedGw = () => Number($('#gwSelect').value);
 
 function renderAll(draft) {
@@ -274,7 +288,7 @@ function renderGwForm(draft) {
     const pts = rec && rec.scores[p.id] != null ? rec.scores[p.id] : '';
     const paid = rec && rec.paid[p.id] ? 'checked' : '';
     return `<tr data-id="${esc(p.id)}">
-      <td>${esc(p.name)}</td>
+      <td>${playerCell(p.id)}</td>
       <td><input type="number" class="pts" step="1" inputmode="numeric" value="${pts}" ${lock()}></td>
       <td class="c"><input type="checkbox" class="paid" ${paid} ${lock()}></td>
       <td class="c rank">–</td>
@@ -483,11 +497,21 @@ async function importFplGw() {
     Object.assign(snap.totals, fromHistory);
   }
 
+  // Keep each player's FPL team name and club badge up to date (shown next to their name).
+  for (const p of data.players) {
+    const row = found[p.id];
+    if (!row) continue;
+    if (row.entry_name) p.teamName = row.entry_name; else delete p.teamName;
+    if (row.club_badge_src) p.badge = row.club_badge_src; else delete p.badge;
+  }
+
   const scores = fplGwScores(found, baseline);
   const byStatus = status => ids.filter(id => scores[id].status === status);
   // Same totals as after the previous gameweek for everyone -> FPL hasn't updated this gameweek yet.
   if (byStatus('unchanged').length === ids.length) {
-    if (seeded.length) { store(); renderJson(); }
+    store();
+    refreshPlayerCells();
+    renderJson();
     const text = `FPL hasn't updated GW ${gw} yet — every total is the same as after GW ${prevGw}. Try again later.`;
     fplNote = { gw, html: `<div class="neg">${text}</div>` };
     renderFplNote();
@@ -498,6 +522,7 @@ async function importFplGw() {
   const pick = key => Object.fromEntries(ids.map(id => [id, found[id][key]]));
   data.fplSnapshots[gw] = { totals: pick('total'), eventTotals: pick('event_total'), fetchedAt: new Date().toISOString() };
   store();
+  refreshPlayerCells();
   renderJson();
 
   if (shownGw !== gw) {
@@ -666,7 +691,7 @@ function renderStandings() {
     const owes = r.owes ? money(r.owes) + settle : '–';
     return `<tr>
       <td>${i + 1}</td>
-      <td>${esc(r.name)}</td>
+      <td>${playerCell(r.id)}</td>
       <td class="r">${r.gws}</td>
       <td class="r">${r.points}</td>
       ${r.podium.map(n => `<td class="c">${n || ''}</td>`).join('')}
@@ -706,7 +731,7 @@ function renderHistory() {
     const winners = Object.keys(res)
       .filter(id => res[id].prize > 0)
       .sort((a, b) => res[a].rank - res[b].rank)
-      .map(id => `${medal(res[id].rank)} ${esc(playerName(id))} <b>${money(res[id].prize)}</b> <small>(${g.scores[id]} pts)</small>`)
+      .map(id => `${medal(res[id].rank)} ${esc(playerName(id))}${findPlayer(id).teamName ? ` <small class="muted">${esc(findPlayer(id).teamName)}</small>` : ''} <b>${money(res[id].prize)}</b> <small>(${g.scores[id]} pts)</small>`)
       .join('<br>');
     const unpaid = Object.keys(g.scores).filter(id => !g.paid[id]).map(id => esc(playerName(id)));
     return `<tr data-gw="${g.gw}">
@@ -792,7 +817,12 @@ function saveSettings() {
     return flash(msg, 'Please check the numbers.', true);
   }
   const draft = readDraft();
-  data.players = nameInputs.map(i => ({ id: i.dataset.id, name: i.value.trim() }));
+  data.players = nameInputs.map(i => {
+    const old = data.players.find(p => p.id === i.dataset.id);
+    const name = i.value.trim();
+    // A renamed player may now be a different FPL manager: their team name and badge come back at the next fetch.
+    return old && old.name === name ? Object.assign({}, old) : { id: i.dataset.id, name };
+  });
   data.settings = s;
   store();
   renderAll(draft);
@@ -846,6 +876,13 @@ function resetData() {
   renderAll();
 }
 
+// Updates names/badges in the tables without re-rendering the gameweek form (that would drop typed points).
+function refreshPlayerCells() {
+  for (const tr of $$('#gwBody tr')) tr.cells[0].innerHTML = playerCell(tr.dataset.id);
+  renderStandings();
+  renderHistory();
+}
+
 /* Start-up */
 
 // Viewers still see everything, but every field is disabled and the buttons that change data are hidden.
@@ -897,6 +934,13 @@ async function init() {
     if (confirmLeaveGw()) renderGwForm();
     else $('#gwSelect').value = shownGw;
   });
+  // A badge that fails to load is swapped for the initials circle. ('error' doesn't bubble, so listen in capture.)
+  document.addEventListener('error', e => {
+    const img = e.target;
+    if (img.tagName === 'IMG' && img.classList.contains('badge')) {
+      img.outerHTML = `<span class="badge badge-default" aria-hidden="true">${esc(img.dataset.initials)}</span>`;
+    }
+  }, true);
   $('#gwBody').addEventListener('input', updatePreview);
   $('#gwBody').addEventListener('change', onPaidChange);
   $('#paidAll').addEventListener('change', onPaidChange);
